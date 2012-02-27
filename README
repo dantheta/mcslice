@@ -1,0 +1,56 @@
+
+MCSlice - Minecraft Map Slice Viewer
+Daniel Ramsay <daniel@dretzq.org.uk>
+
+Shows a 2-dimensional cross-section view of a minecraft map, with color
+highlighting of desirable ores.
+
+REQUIREMENTS
+------------
+
+python 2.6+
+simplejson
+pygame
+
+INSTRUCTIONS
+------------
+
+Run:
+
+$ python mcdump.py ~/.minecraft/saves/<savegame>/regions/*.mcr
+
+This creates unpacked region chunks in a "dump" directory.
+
+Then, run: 
+
+$ python explore.py [x position] [z position]
+
+to run the cross-section viewer.  X & Z parameters are optional.
+
+CONTROLS
+--------
+
+Up/Down			move +/- along Z axis
+Left/Right		move +/- along X axis (jump by 16 blocks)
+PgUp/PgDown		move +/- 10 on Z axis
+Equals/Minus	zoom in/out
+
+Left-click		show co-ordinates and material for block under cursor
+
+BUGS
+----
+
+* Display lurches when moving through the z-layer to a new row of chunks
+* Not a complete NBT parser.  Cheats horribly.
+* Inefficient storage of chunk data
+* Pretty poor handling of clicks outside the map
+* No vertical panning
+* No sky color!
+* Many more!
+
+
+CREDITS
+-------
+
+Blocks.json datafile was borrowed from mcobj (https://github.com/quag/mcobj), 
+and lightly modified to show diamond in a nice bright magenta.
