@@ -7,43 +7,58 @@ from pygame.locals import *
 
 def create_color(colorstr):
 	"""Create pygame Color from hex string"""
-	r,g,b = colorstr[1:3], colorstr[3:5], colorstr[5:7]
-	return pygame.Color(int(r,16), int(g, 16), int(b,16), 255)
+	try:
+		return pygame.Color(colorstr[:7])
+	except TypeError:
+		print >>sys.stderr, "Invalid color: ", colorstr[:7]
+		return pygame.Color(0,0,0,255)
 
-def mapxyz(x, y, z):
-	"""Maps x/y/z co-ordinates to a byte offset in chunk data."""
-	v  = y + (z % 16) * 128 + (x % 16) * 128 * 16
-	return v
 
 # load blocks.json
 blockdata = simplejson.load(open('blocks.json'))
-BLOCKS = dict([ (x['blockId'], (x['name'], create_color(x['color']))) 
+BLOCKS = dict([ (x['blockId'], (x['name'], create_color(x['color'])))
 	for x in blockdata ])
 
 class Chunk():
-	def __init__(self, data):
-		self.data = data
+	def __init__(self, path):
 		self.layers = {}
+		self.path = path
+
+		fp = open(path)
+		self.data = [ord(x) for x in fp.read(32768)]
+		fp.close()
 
 		self.draw_layers()
 
 	def draw_layers(self):
 		"""Draw layers to offscreen surface after load."""
 		for z in xrange(0,16):
+			#create surface for this layer
 			srf = pygame.Surface((16,128))
 			for x in xrange(0,16):
 				for y in xrange(0,128):
-					v = self.data[ mapxyz( x,y,z) ]
+					v = self.data[ self.xyz_to_offset( x,y,z) ]
 					if v != 0:
 						srf.fill( BLOCKS.get(v, [0,0])[1], 	(x, 127 -y, 1, 1 ))
+			#save layer to dict for this chunk
 			self.layers[z] = srf
 
 	def get_layer(self, index):
 		return self.layers[index]
 
-
 	def __getitem__(self, index):
+		"""Get value at offset in this chunk's data"""
 		return self.data[index]
+
+	def get_value(self, x, y, z):
+		"""Get value for xyz in chunk"""
+		return self.data[ self.xyz_to_offset(x,y,z) ]
+
+	@staticmethod
+	def xyz_to_offset(x, y, z):
+		"""Maps x/y/z co-ordinates to a byte offset in chunk data."""
+		v  = y + (z % 16) * 128 + (x % 16) * 128 * 16
+		return v
 
 class Pos:
 	def __init__(self, x = 0, y = 0, z = 0):
@@ -81,14 +96,6 @@ class Explorer:
 
 	def keydown(self, evt):
 		"""Keyboard key down event handler"""
-		#if evt.key == K_DOWN:
-		#	self.pos.dz -= self.K_AMT
-		#if evt.key == K_UP:
-		#	self.pos.dz += self.K_AMT
-		#if evt.key == K_LEFT:
-		#	self.pos.dx -= self.K_AMT
-		#if evt.key == K_RIGHT: 
-		#	self.pos.dx += self.K_AMT
 		if evt.key == K_EQUALS:
 			self.scale += 1
 			print "Zoom: ", self.scale
@@ -96,13 +103,13 @@ class Explorer:
 			self.scale -= 1
 			print "Zoom: ", self.scale
 		if evt.key == K_PAGEDOWN:
-			self.pos.z += 10# self.K_AMT
+			self.pos.z += 10
 		if evt.key == K_PAGEUP:
-			self.pos.z -= 10# self.K_AMT
+			self.pos.z -= 10
 		if evt.key == K_DOWN:
-			self.pos.z += 1# self.K_AMT
+			self.pos.z += 1
 		if evt.key == K_UP:
-			self.pos.z -= 1# self.K_AMT
+			self.pos.z -= 1
 		if evt.key == K_LEFT:
 			self.pos.x -= 16
 		if evt.key == K_RIGHT: 
@@ -112,14 +119,6 @@ class Explorer:
 
 	def keyup(self, evt):
 		"""Keyboard key release event handler"""
-		#if evt.key == K_DOWN:
-		#	self.pos.dz += self.K_AMT
-		#if evt.key == K_UP:
-		#	self.pos.dz -= self.K_AMT
-		#if evt.key == K_LEFT:
-		#	self.pos.dx += self.K_AMT
-		#if evt.key == K_RIGHT: 
-		#	self.pos.dx -= self.K_AMT
 		pass
 
 	def mousedown(self, evt):
@@ -134,10 +133,10 @@ class Explorer:
 
 		print x,y,z
 
-		region = self.get_region(x,z)
-		chunk = self.get_chunk(x,z)
-		self.open_chunk(region, chunk)
-		name = BLOCKS.get(self.get_value(region, chunk, x,y,z), ('',0))[0]
+		chunkobj = self.get_chunk(x,z)
+		if not chunkobj:
+			return
+		name = BLOCKS.get(chunkobj.get_value( x,y,z), [0])[0]
 
 		self.point_data = {
 			'x': x,
@@ -146,47 +145,32 @@ class Explorer:
 			'name': name
 		}
 
-	def get_region(self, x, z):
-		"""Get minecraft region from x/z co-ordinates"""
-		return x/512, z/512
 
-	def get_chunk(self, x, z):
-		"""Get chunk number (inside a region) from x/z co-ordinates"""
-		return ((x/16) % 32) + (((z/16) % 32) * 32)
-
-	def open_chunk(self, region, chunk):
-		if not (region[0], region[1], chunk) in self.chunks:
+	def get_chunk(self, x,z):
+		region = x/512, z/512
+		chunknum = ((x/16) % 32) + (((z/16) % 32) * 32)
+		if not (region, chunknum) in self.chunks:
 			try:
-				print "Opening: ", region, chunk
-				fp = open("dump/%d/%d/%04d.chunk"%(region[0], region[1], chunk))
-				buf = [ ord(x) for x in fp.read(32768) ]
-				newchunk = Chunk(buf)
-				self.chunks[ (region[0], region[1], chunk) ] = newchunk
-				fp.close()
+				print "Opening: ", region, chunknum
+				newchunk = Chunk("dump/%d/%d/%04d.chunk"%(region[0], region[1], chunknum))
+				self.chunks[ (region, chunknum) ] = newchunk
 				return newchunk
 			except IOError:
-				self.chunks[ (region[0], region[1], chunk) ] = None
+				print "Not found: ", region, chunknum
+				self.chunks[ (region, chunknum) ] = None
 				return None
 		else:
-			return self.chunks[ (region[0], region[1], chunk) ]
+			return self.chunks[ (region, chunknum) ]
 				
-	
-	def get_value(self, region, chunk, x, y, z):
-		"""Get the block value for a specific offset inside a chunk."""
-		p =  mapxyz(x,y,z) 
-		if self.chunks[(region[0], region[1], chunk)] == None:
-			return 0
-		return self.chunks[ (region[0], region[1], chunk) ][p]
-
-
 	def clear(self):
 		"""Clear drawing canvas"""
 		self.surface.fill(0)
 
+	def drawtext(self, txt, tx, ty):
+		fsrf = self.font.render(txt, True, pygame.Color('white'))
+		self.surface.blit(fsrf, (tx ,ty))
+
 	def draw(self):
-		def drawtext(txt, tx, ty):
-			fsrf = self.font.render(txt, True, pygame.Color('white'))
-			self.surface.blit(fsrf, (tx ,ty))
 
 		# how many chunks fit in the screen
 
@@ -194,11 +178,10 @@ class Explorer:
 
 		#center on chunk at self.pos.x
 
+		#count chunks from left to right
 		for x in xrange(0-chunks/2, chunks/2):
 			chunkx = x * 16
-			region = self.get_region((self.pos.x + chunkx), self.pos.z)
-			chunk = self.get_chunk((self.pos.x + chunkx), self.pos.z)
-			chunkobj = self.open_chunk(region, chunk)
+			chunkobj = self.get_chunk((self.pos.x + chunkx), self.pos.z)
 			if chunkobj:
 				if self.scale == 1:
 					layer = chunkobj.get_layer( self.pos.z % 16 )
@@ -207,13 +190,13 @@ class Explorer:
 				self.surface.blit(layer, (512 + (chunkx*self.scale) , 300 - ( 64 * self.scale )))
 
 
-		drawtext("X: %d" %(self.pos.x), 0, 0)
-		drawtext("Z: %d" %( self.pos.z), 0, 40)
+		self.drawtext("X: %d" %(self.pos.x), 0, 0)
+		self.drawtext("Z: %d" %( self.pos.z), 0, 40)
 
-		drawtext("X: %d" %( self.point_data['x']), 850, 0)
-		drawtext("Y: %d" %( self.point_data['y']), 850, 30)
-		drawtext("Z: %d" %( self.point_data['z']), 850, 60)
-		drawtext("Name: %s" %( self.point_data['name']), 850, 90)
+		self.drawtext("X: %d" %( self.point_data['x']), 850, 0)
+		self.drawtext("Y: %d" %( self.point_data['y']), 850, 30)
+		self.drawtext("Z: %d" %( self.point_data['z']), 850, 60)
+		self.drawtext("Name: %s" %( self.point_data['name']), 850, 90)
 
 	def main(self):
 		self.draw()
@@ -239,10 +222,13 @@ class Explorer:
 				pygame.display.update()
 				pygame.display.flip()
 
-print sys.argv
+	def shutdown(self):
+		pygame.display.quit()
+
 if len(sys.argv) == 3:
 	pos = Pos(int(sys.argv[1]),0,int(sys.argv[2]))
 else:
 	pos = Pos()
 explore = Explorer(pos)
 explore.main()
+explore.shutdown()
