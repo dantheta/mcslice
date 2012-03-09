@@ -18,6 +18,9 @@ for filename in sys.argv[1:]:
 	parts = base.split('.')
 	print parts
 
+	regionx = int(parts[1])
+	regionz = int(parts[2])
+
 	outpath = os.path.join( 'dump', parts[1], parts[2])
 	print outpath
 	try:
@@ -25,6 +28,9 @@ for filename in sys.argv[1:]:
 	except: pass
 
 	fp = open(filename)
+	fpout = open(os.path.join(outpath, 'data.dat'), 'w')
+
+
 	for chunknum in range(0, 1024):
 		# seek to chunk header
 		fp.seek(chunknum * 4, 0)
@@ -33,6 +39,11 @@ for filename in sys.argv[1:]:
 		# uninitialized chunks don't have an offset
 		if buf == '\0\0\0\0':
 			continue
+
+
+		chunkx = (chunknum % 32) * 16
+		chunkz = (chunknum / 32) * 16
+		print "Chunk: ", chunkx, chunkz
 
 		# 24-bit int bigendian conversion
 		loc = (ord(buf[0]) << 16) + (ord(buf[1]) << 8) + ord(buf[2])
@@ -48,12 +59,20 @@ for filename in sys.argv[1:]:
 		# decompress data
 		data = zlib.decompress(buf[5:datalen+5])[2:]
 
-		# crappy seek to blocks data inside decompressed area
-		blockstart = data.find('Blocks') + 10
 
-		# dump uncompressed data to a file
-		fpout = open(os.path.join('dump', parts[1], parts[2], "%04d.chunk"%(chunknum)), 'w')
-		fpout.write(data[blockstart:blockstart+32768])
-		fpout.close()
+		blockdata = []
+		lastfound = data.find('Sections')
+		blockstart = None
+		while True:
+			blockstart = data.find('Blocks', lastfound)
+			if blockstart == -1:
+				break
+			lastfound = blockstart+1
+			blocky  = ord(data[blockstart - 4])*16
+			print "Y: ", blocky
+
+			blockdata.append( data[blockstart+10:blockstart+10+4096 ])
+
+
 
 	fp.close()
